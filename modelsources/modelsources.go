@@ -8,8 +8,10 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -604,22 +606,49 @@ func discoverLLMIntegrations(ctx context.Context, httpc *http.Client, logger *sl
 }
 
 func loadLLMIntegration(ctx context.Context, httpc *http.Client, logger *slog.Logger, env exeenv.Environment, integ reflectionIntegration) (*LLMIntegrationConfig, bool) {
-	host := integ.host(env)
-	base := env.IntegrationURL(integ.Name, integ.Team)
+	return loadLLMIntegrationAt(ctx, httpc, logger, integ.Name, integ.host(env), env.IntegrationURL(integ.Name, integ.Team))
+}
+
+// ValidateIntegrationURL checks a configured LLM integration base URL.
+func ValidateIntegrationURL(base string) error {
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%q must be an absolute HTTP(S) base URL", base)
+	}
+	return nil
+}
+
+// LoadConfiguredLLMIntegration loads an LLM integration named in shelley.json
+// rather than discovered on an exe.dev VM, such as a local credential proxy.
+// base must pass ValidateIntegrationURL. It returns nil when the catalog
+// cannot be loaded; the model refresh retries it.
+func LoadConfiguredLLMIntegration(ctx context.Context, httpc *http.Client, logger *slog.Logger, name, base string) *LLMIntegrationConfig {
+	if httpc == nil {
+		httpc = http.DefaultClient
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	u, _ := url.Parse(base)
+	integ, _ := loadLLMIntegrationAt(ctx, httpc, logger, name, u.Host, strings.TrimSuffix(base, "/"))
+	return integ
+}
+
+func loadLLMIntegrationAt(ctx context.Context, httpc *http.Client, logger *slog.Logger, name, host, base string) (*LLMIntegrationConfig, bool) {
 	var catalog llmIntegrationModelCatalog
 	if !fetchJSON(ctx, httpc, base+"/models.json", &catalog) {
-		logger.Warn("LLM integration discovery: models.json fetch failed; skipping", "name", integ.Name, "host", host)
+		logger.Warn("LLM integration discovery: models.json fetch failed; skipping", "name", name, "host", host)
 		return nil, false
 	}
 	models := integrationModelsFromCatalog(catalog)
 	transcriptionModels := transcriptionModelsFromCatalog(catalog)
 	if len(models) == 0 && len(transcriptionModels) == 0 {
-		logger.Warn("LLM integration discovery: models.json returned no supported models; skipping", "name", integ.Name, "host", host)
+		logger.Warn("LLM integration discovery: models.json returned no supported models; skipping", "name", name, "host", host)
 		return nil, true
 	}
-	logger.Info("Discovered exe.dev LLM integration", "name", integ.Name, "host", host, "models", len(models), "transcription_models", len(transcriptionModels))
+	logger.Info("Loaded LLM integration", "name", name, "host", host, "models", len(models), "transcription_models", len(transcriptionModels))
 	return &LLMIntegrationConfig{
-		Name:                integ.Name,
+		Name:                name,
 		Host:                host,
 		URL:                 base,
 		Models:              models,

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -707,5 +708,68 @@ func TestToolModelsStayWithinSavedAccount(t *testing.T) {
 	}
 	if got := choices("gpt-6.1-sol"); !slices.Equal(got, []claudetool.AvailableModel{{Name: "gpt-6.1-sol", ID: "gpt-6.1-sol"}}) {
 		t.Fatalf("legacy choices gained saved-account routes: %+v", got)
+	}
+}
+
+func TestBuildLLMConfigLoadsConfiguredLLMIntegration(t *testing.T) {
+	oldDiscover := discoverLLMIntegrations
+	discoverLLMIntegrations = func(context.Context, *http.Client, *slog.Logger) modelsources.LLMIntegrationDiscoveryResult {
+		return modelsources.LLMIntegrationDiscoveryResult{}
+	}
+	t.Cleanup(func() { discoverLLMIntegrations = oldDiscover })
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("FIREWORKS_API_KEY", "")
+
+	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models.json" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"schema_version":1,"models":[{"id":"chatgpt-sol","native_id":"gpt-6.1-sol","provider":"openai","apis":["openai_responses"],"exe_dev":{"mode":"chatgpt"}}]}`)
+	}))
+	defer edge.Close()
+
+	configPath := filepath.Join(t.TempDir(), "shelley.json")
+	config := fmt.Sprintf(`{"llm_gateway":"https://gateway.example.com","llm_integrations":[{"name":"edge","url":%q}]}`, edge.URL+"/")
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := buildLLMConfig(GlobalConfig{ConfigPath: configPath}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *models.Built
+	for i, model := range cfg.Models {
+		if model.Source == "exe.dev gateway" {
+			t.Fatalf("gateway model %q was built despite a configured LLM integration", model.ID)
+		}
+		if model.APIModelName == "gpt-6.1-sol" {
+			found = &cfg.Models[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("configured integration model missing: %+v", cfg.Models)
+	}
+	if found.Mode != "chatgpt" || found.BaseURL != edge.URL || found.APIType != models.APITypeOpenAIResponses {
+		t.Fatalf("got mode=%q base=%q api=%q", found.Mode, found.BaseURL, found.APIType)
+	}
+}
+
+func TestLoadConfigRejectsInvalidLLMIntegrations(t *testing.T) {
+	for _, config := range []string{
+		`{"llm_integrations":[{"name":"","url":"http://127.0.0.1:8080"}]}`,
+		`{"llm_integrations":[{"name":"a","url":"http://127.0.0.1:8080"},{"name":"a","url":"http://127.0.0.1:8081"}]}`,
+		`{"llm_integrations":[{"name":"a","url":"127.0.0.1:8080"}]}`,
+		`{"llm_integrations":[{"name":"a","url":"http://127.0.0.1:8080?x=1"}]}`,
+	} {
+		path := filepath.Join(t.TempDir(), "shelley.json")
+		if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadConfig(path); err == nil {
+			t.Errorf("accepted %s", config)
+		}
 	}
 }

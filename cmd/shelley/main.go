@@ -40,6 +40,14 @@ type GlobalConfig struct {
 type shelleyConfig struct {
 	LLMGateway   string `json:"llm_gateway"`
 	DefaultModel string `json:"default_model"`
+	// LLMIntegrations are LLM integrations reached at a fixed URL instead of
+	// discovered on an exe.dev VM, e.g. a credential proxy on the host.
+	LLMIntegrations []configuredLLMIntegration `json:"llm_integrations"`
+}
+
+type configuredLLMIntegration struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 var discoverLLMIntegrations = modelsources.DiscoverLLMIntegrations
@@ -590,6 +598,16 @@ func loadConfig(path string) (shelleyConfig, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return shelleyConfig{}, fmt.Errorf("parse config file: %w", err)
 	}
+	names := map[string]bool{}
+	for _, integ := range config.LLMIntegrations {
+		if integ.Name == "" || names[integ.Name] {
+			return shelleyConfig{}, fmt.Errorf("llm_integrations: each entry needs a unique name")
+		}
+		names[integ.Name] = true
+		if err := modelsources.ValidateIntegrationURL(integ.URL); err != nil {
+			return shelleyConfig{}, fmt.Errorf("llm_integrations %q: %w", integ.Name, err)
+		}
+	}
 	return config, nil
 }
 
@@ -612,6 +630,12 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shell
 		discovered := discoverLLMIntegrations(ctx, nil, logger)
 		llmIntegrationFound = discovered.Found
 		integs = discovered.Integrations
+	}
+	for _, configured := range config.LLMIntegrations {
+		llmIntegrationFound = true
+		if integ := modelsources.LoadConfiguredLLMIntegration(ctx, nil, logger, configured.Name, configured.URL); integ != nil {
+			integs = append(integs, integ)
+		}
 	}
 	for i, integ := range integs {
 		suffix := ""
