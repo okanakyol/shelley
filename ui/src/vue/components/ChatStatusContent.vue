@@ -11,7 +11,7 @@
 
   <!-- Error, with the connection state beside it: the stream may be failing
        for the same reason (e.g. a full disk), so neither hides the other. -->
-  <template v-else-if="error">
+  <template v-else-if="error && !pickerError">
     <span
       v-if="streamStatus === 'disconnected'"
       class="status-message status-warning status-connection"
@@ -102,6 +102,7 @@
 
   <!-- New conversation or draft -->
   <div v-else class="status-bar-new-conversation">
+    <span v-if="pickerError" class="status-message status-error">{{ error }}</span>
     <div class="status-field status-field-model">
       <ModelPicker
         :models="models"
@@ -200,6 +201,17 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
+
+// A removed provider account is fixed by picking another model, so that error
+// shows beside the composer's model picker instead of replacing it.
+const pickerError = computed(
+  () =>
+    props.error === t("providerSelectionRequired") &&
+    !(
+      props.conversationId &&
+      (props.agentWorking || props.interrupted || !props.currentConversation?.is_draft)
+    ),
+);
 
 // The conversation's cwd once saved, the picked one while it is still a draft.
 const cwd = computed(() => props.currentConversation?.cwd || props.selectedCwd);
