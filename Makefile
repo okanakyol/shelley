@@ -28,6 +28,7 @@ templates:
 build: exe-scroll ui templates
 	@echo "Building Shelley..."
 	go build -o bin/shelley ./cmd/shelley
+	go build -o bin/shelley-edge ./cmd/shelley-edge
 
 # Build a customized Shelley binary (see the customizing-shelley skill).
 # Stamps the release tag this branch diverged from (latest release tag at the
