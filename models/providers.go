@@ -15,7 +15,29 @@ import (
 	"shelley.exe.dev/models/modelsdev"
 )
 
-func ProviderModelEligible(endpoint, upstreamID string) bool {
+// ProviderTypeOpenCode is an OpenCode Zen or Go account, which serves each
+// model over the wire protocol models.dev records for it.
+const ProviderTypeOpenCode = "opencode"
+
+// openCodeProviderType maps a model's AI SDK package to the provider type that
+// speaks its protocol, or "" when Shelley has no matching client.
+func openCodeProviderType(npm string) string {
+	switch npm {
+	case "@ai-sdk/anthropic":
+		return "anthropic"
+	case "@ai-sdk/openai":
+		return "openai-responses"
+	case "@ai-sdk/openai-compatible":
+		return "openai"
+	}
+	return ""
+}
+
+func ProviderModelEligible(providerType, endpoint, upstreamID string) bool {
+	if providerType == ProviderTypeOpenCode {
+		known, ok := modelsdev.LookupProviderModel(endpoint, upstreamID)
+		return ok && known.Chat && openCodeProviderType(known.NPM) != ""
+	}
 	if known, ok := modelsdev.LookupProviderModel(endpoint, upstreamID); ok {
 		return known.Chat
 	}
@@ -162,8 +184,13 @@ func (m *Manager) providerEntry(row db.ModelProvider, wire string) (serviceEntry
 			model.ReasoningSupport = "yes"
 		}
 	}
+	if row.ProviderType == ProviderTypeOpenCode {
+		if model.ProviderType = openCodeProviderType(known.NPM); !exact || model.ProviderType == "" {
+			return serviceEntry{}, fmt.Errorf("OpenCode model %s has no supported protocol", wire)
+		}
+	}
 	var apiType APIType
-	switch row.ProviderType {
+	switch model.ProviderType {
 	case "anthropic":
 		model.Endpoint = strings.TrimRight(row.Endpoint, "/") + "/messages"
 		apiType = APITypeAnthropicMessages
@@ -172,7 +199,7 @@ func (m *Manager) providerEntry(row db.ModelProvider, wire string) (serviceEntry
 	case "openai-responses":
 		apiType = APITypeOpenAIResponses
 	default:
-		return serviceEntry{}, fmt.Errorf("unsupported provider type: %s", row.ProviderType)
+		return serviceEntry{}, fmt.Errorf("unsupported provider type: %s", model.ProviderType)
 	}
 	service := m.createServiceFromModel(&model).(*reasoningService)
 	service.disableWebSearch = true
@@ -198,7 +225,7 @@ func (m *Manager) providerEntry(row db.ModelProvider, wire string) (serviceEntry
 		label = row.Endpoint
 	}
 	provider := ProviderOpenAI
-	if row.ProviderType == "anthropic" {
+	if model.ProviderType == "anthropic" {
 		provider = ProviderAnthropic
 	}
 	return serviceEntry{

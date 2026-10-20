@@ -229,7 +229,9 @@ func (m *Manager) prepare(ctx context.Context, p *db.ModelProvider) error {
 }
 
 func candidate(input Input, old *db.ModelProvider) (db.ModelProvider, error) {
-	if input.ProviderType != "anthropic" && input.ProviderType != "openai" && input.ProviderType != "openai-responses" {
+	switch input.ProviderType {
+	case "anthropic", "openai", "openai-responses", models.ProviderTypeOpenCode:
+	default:
 		return db.ModelProvider{}, fmt.Errorf("%w: unsupported provider_type", ErrInvalid)
 	}
 	endpoint, err := canonicalEndpoint(input.Endpoint)

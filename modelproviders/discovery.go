@@ -64,7 +64,7 @@ func (m *Manager) discover(ctx context.Context, p db.ModelProvider) ([]db.Provid
 			if len(seenIDs) > discoveryModelLimit {
 				return nil, discoveryFailure("model limit exceeded")
 			}
-			if models.ProviderModelEligible(p.Endpoint, item.ID) {
+			if models.ProviderModelEligible(p.ProviderType, p.Endpoint, item.ID) {
 				result = append(result, item)
 			}
 		}

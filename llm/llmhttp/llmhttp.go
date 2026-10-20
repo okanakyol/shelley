@@ -199,6 +199,11 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Add provider-specific prompt-cache affinity when either an explicit key
 	// or the conversation fallback is present.
 	if cacheKey := PromptCacheKeyFromContext(req.Context()); cacheKey != "" {
+		// OpenCode routes requests with the same session to the same upstream,
+		// which keeps the conversation's prompt cache warm.
+		if req.URL.Hostname() == "opencode.ai" {
+			req.Header.Set("x-opencode-session", cacheKey)
+		}
 		switch ProviderFromContext(req.Context()) {
 		case "fireworks":
 			req.Header.Set("x-session-affinity", cacheKey)

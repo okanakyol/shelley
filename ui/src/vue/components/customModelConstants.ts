@@ -1,3 +1,5 @@
+import type { ModelProviderType } from "../../services/api";
+
 // Shared constants + form types for the custom-model UI, used by both
 // ModelsModal.vue (the list) and ModelFormModal.vue (the add/edit dialog).
 
@@ -30,12 +32,19 @@ export const ENDPOINT_PRESETS: Record<ProviderType, { name: string; url: string 
   gemini: [{ name: "Google Gemini", url: DEFAULT_ENDPOINTS.gemini }],
 };
 
-export function endpointPresetsFor(provider: ProviderType, connection = false) {
-  return ENDPOINT_PRESETS[provider].map((preset) => ({
-    ...preset,
-    url:
-      connection && provider === "anthropic" ? preset.url.replace(/\/messages$/, "") : preset.url,
-  }));
+export function endpointPresetsFor(provider: ProviderType) {
+  return ENDPOINT_PRESETS[provider];
+}
+
+// Connections store the API base, so Anthropic presets drop the /messages operation.
+export function connectionPresetsFor(type: ModelProviderType) {
+  if (type === "opencode") {
+    return [
+      { name: "OpenCode Go", url: "https://opencode.ai/zen/go/v1" },
+      { name: "OpenCode Zen", url: "https://opencode.ai/zen/v1" },
+    ];
+  }
+  return ENDPOINT_PRESETS[type].map((preset) => ({ ...preset, url: preset.url.replace(/\/messages$/, "") }));
 }
 
 export const PROVIDER_LABELS: Record<ProviderType, string> = {
@@ -50,6 +59,21 @@ export const PROVIDER_TAB_LABELS: Record<ProviderType, string> = {
   openai: "OpenAI Chat",
   "openai-responses": "OpenAI Responses",
   gemini: "Gemini",
+};
+
+// OpenCode connections pick each model's protocol from models.dev.
+export const CONNECTION_LABELS: Record<ModelProviderType, string> = {
+  anthropic: PROVIDER_LABELS.anthropic,
+  openai: PROVIDER_LABELS.openai,
+  "openai-responses": PROVIDER_LABELS["openai-responses"],
+  opencode: "OpenCode",
+};
+
+export const CONNECTION_TAB_LABELS: Record<ModelProviderType, string> = {
+  anthropic: PROVIDER_TAB_LABELS.anthropic,
+  openai: PROVIDER_TAB_LABELS.openai,
+  "openai-responses": PROVIDER_TAB_LABELS["openai-responses"],
+  opencode: "OpenCode",
 };
 
 // Autocomplete suggestions offered for the model-name field, per provider.

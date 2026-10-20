@@ -1436,7 +1436,7 @@ class CustomModelsApi {
 
 export const customModelsApi = new CustomModelsApi();
 
-export type ModelProviderType = "anthropic" | "openai" | "openai-responses";
+export type ModelProviderType = "anthropic" | "openai" | "openai-responses" | "opencode";
 
 export interface ModelProviderInput {
   provider_type: ModelProviderType;

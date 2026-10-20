@@ -305,7 +305,7 @@ import ModelFormModal from "./ModelFormModal.vue";
 import { modelsTableDt } from "./modelsTableDt";
 import { prettyModelLabels } from "../../utils/modelNames";
 import { accountSuffixes } from "../../utils/providerAccounts";
-import { API_TYPE_LABELS, PROVIDER_LABELS } from "./customModelConstants";
+import { API_TYPE_LABELS, CONNECTION_LABELS, PROVIDER_LABELS } from "./customModelConstants";
 import { useI18n } from "../composables/i18n";
 import {
   api,
@@ -364,7 +364,7 @@ const providerSuffixes = computed(() => {
 });
 
 function providerName(provider: ModelProviderConnection): string {
-  return provider.display_name || PROVIDER_LABELS[provider.provider_type];
+  return provider.display_name || CONNECTION_LABELS[provider.provider_type];
 }
 
 function providerSuffix(provider: ModelProviderConnection): string {

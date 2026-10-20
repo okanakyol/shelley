@@ -37,6 +37,10 @@ type modelEntry struct {
 		Output []string `json:"output"`
 	} `json:"modalities"`
 	Cost Cost `json:"cost"`
+	// Provider.NPM overrides the provider's SDK package for this model.
+	Provider struct {
+		NPM string `json:"npm"`
+	} `json:"provider"`
 }
 
 type reasoningOption struct {
@@ -106,7 +110,9 @@ type providerEntry struct {
 	// API is the provider's base URL (the "api" field in models.dev), e.g.
 	// "https://opencode.ai/zen/v1". Used to match custom models by their
 	// configured endpoint instead of by Shelley's internal provider name.
-	API    string                `json:"api"`
+	API string `json:"api"`
+	// NPM is the AI SDK package that speaks this provider's wire protocol.
+	NPM    string                `json:"npm"`
 	Models map[string]modelEntry `json:"models"`
 }
 

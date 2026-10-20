@@ -10,6 +10,7 @@ import (
 
 	"shelley.exe.dev/db"
 	"shelley.exe.dev/llm"
+	"shelley.exe.dev/llm/ant"
 	"shelley.exe.dev/llm/oai"
 )
 
@@ -24,7 +25,7 @@ func TestProviderModelAdmission(t *testing.T) {
 		{"https://gateway.example/v1", "claude-sonnet-5-5", true},
 		{"https://gateway.example/v1", "unrecognized-embedding", false},
 	} {
-		if got := ProviderModelEligible(tc.endpoint, tc.model); got != tc.want {
+		if got := ProviderModelEligible("openai", tc.endpoint, tc.model); got != tc.want {
 			t.Errorf("%s %s: got %t", tc.endpoint, tc.model, got)
 		}
 	}
@@ -238,5 +239,61 @@ func TestSavedProviderReasoningDoesNotOverrideInternalRequests(t *testing.T) {
 				t.Fatal("internal request did not reach the adapter for normalization")
 			}
 		})
+	}
+}
+
+func TestOpenCodeRoutesEachModelByProtocol(t *testing.T) {
+	const endpoint = "https://opencode.ai/zen/go/v1"
+	database, cleanup := db.NewTestDB(t)
+	t.Cleanup(cleanup)
+	row := db.ModelProvider{ProviderID: "oc", ProviderType: ProviderTypeOpenCode, Endpoint: endpoint, APIKey: "key", Models: []db.ProviderModel{
+		{ID: "glm-5.3"}, {ID: "minimax-m3"}, {ID: "gpt-5.6-luna"},
+	}}
+	if err := database.CreateModelProvider(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(&Config{DB: database, Models: []Built{predictableBuilt()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RefreshProviders(); err != nil {
+		t.Fatal(err)
+	}
+	for wire, want := range map[string]string{
+		"glm-5.3":      "*oai.Service " + endpoint,
+		"minimax-m3":   "*ant.Service " + endpoint + "/messages",
+		"gpt-5.6-luna": "*oai.ResponsesService " + endpoint,
+	} {
+		service, _, _, err := manager.GetServiceSnapshot(ProviderRouteID("oc", wire))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		switch raw := service.(*reasoningService).Service.(type) {
+		case *oai.Service:
+			got = "*oai.Service " + raw.ModelURL
+		case *ant.Service:
+			got = "*ant.Service " + raw.URL
+		case *oai.ResponsesService:
+			got = "*oai.ResponsesService " + raw.ModelURL
+		}
+		if got != want {
+			t.Errorf("%s: got %q, want %q", wire, got, want)
+		}
+	}
+}
+
+func TestOpenCodeAdmitsOnlySupportedProtocols(t *testing.T) {
+	for _, tc := range []struct {
+		endpoint, model string
+		want            bool
+	}{
+		{"https://opencode.ai/zen/go/v1", "glm-5.3", true},
+		{"https://opencode.ai/zen/v1", "gemini-3.1-pro", false},
+		{"https://opencode.ai/zen/go/v1", "not-in-catalog", false},
+	} {
+		if got := ProviderModelEligible(ProviderTypeOpenCode, tc.endpoint, tc.model); got != tc.want {
+			t.Errorf("%s %s: got %t", tc.endpoint, tc.model, got)
+		}
 	}
 }

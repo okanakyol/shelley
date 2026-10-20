@@ -424,3 +424,25 @@ func TestRequestTraceCapturesIDWhenIdleDisabled(t *testing.T) {
 		t.Errorf("UpstreamRequestID = %q, want req_nodeadline", trace.Value("upstream_request_id"))
 	}
 }
+
+func TestTransportOpenCodeSessionHeader(t *testing.T) {
+	var got http.Header
+	transport := &Transport{Base: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r.Header.Clone()
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: r}, nil
+	})}
+	for _, tt := range []struct{ url, want string }{
+		{"https://opencode.ai/zen/go/v1/chat/completions", "conv-1"},
+		{"https://api.example.com/v1/chat/completions", ""},
+	} {
+		req, _ := http.NewRequestWithContext(WithConversationID(t.Context(), "conv-1"), "POST", tt.url, nil)
+		resp, err := transport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if h := got.Get("x-opencode-session"); h != tt.want {
+			t.Errorf("%s: x-opencode-session = %q, want %q", tt.url, h, tt.want)
+		}
+	}
+}

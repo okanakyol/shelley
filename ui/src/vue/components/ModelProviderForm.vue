@@ -9,14 +9,14 @@
       <div class="provider-buttons" role="group" :aria-label="t('providerApiFormat')">
         <button
           v-for="option in providerTypes"
-          :key="option.value"
+          :key="option"
           type="button"
-          :class="`provider-btn ${providerType === option.value ? 'selected' : ''}`"
-          :aria-pressed="providerType === option.value"
-          :aria-label="PROVIDER_LABELS[option.value]"
-          @click="changeProvider(option.value)"
+          :class="`provider-btn ${providerType === option ? 'selected' : ''}`"
+          :aria-pressed="providerType === option"
+          :aria-label="CONNECTION_LABELS[option]"
+          @click="changeProvider(option)"
         >
-          {{ PROVIDER_TAB_LABELS[option.value] }}
+          {{ CONNECTION_TAB_LABELS[option] }}
         </button>
       </div>
     </div>
@@ -97,7 +97,7 @@ import InputText from "primevue/inputtext";
 import { useI18n } from "../composables/i18n";
 import { inputFieldDt } from "./configFieldDt";
 import ModelEndpointInput from "./ModelEndpointInput.vue";
-import { endpointPresetsFor, PROVIDER_LABELS, PROVIDER_TAB_LABELS } from "./customModelConstants";
+import { CONNECTION_LABELS, CONNECTION_TAB_LABELS, connectionPresetsFor } from "./customModelConstants";
 import {
   modelProvidersApi,
   type ModelProviderConnection,
@@ -118,16 +118,13 @@ const endpoints: Record<ModelProviderType, string> = {
   anthropic: "https://api.anthropic.com/v1",
   openai: "https://api.openai.com/v1",
   "openai-responses": "https://api.openai.com/v1",
+  opencode: "https://opencode.ai/zen/go/v1",
 };
-const providerTypes: { value: ModelProviderType; label: string }[] = [
-  { value: "anthropic", label: "Anthropic" },
-  { value: "openai", label: "OpenAI (Chat API)" },
-  { value: "openai-responses", label: "OpenAI (Responses API)" },
-];
+const providerTypes: ModelProviderType[] = ["anthropic", "openai", "openai-responses", "opencode"];
 
 const providerType = ref<ModelProviderType>("anthropic");
 const endpoint = ref(endpoints.anthropic);
-const endpointPresets = computed(() => endpointPresetsFor(providerType.value, true));
+const endpointPresets = computed(() => connectionPresetsFor(providerType.value));
 const displayName = ref("");
 const apiKey = ref("");
 const saving = ref(false);
