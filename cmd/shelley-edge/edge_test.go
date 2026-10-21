@@ -406,7 +406,7 @@ func TestEdgeRefusesBrowsersAndUnknownHosts(t *testing.T) {
 func TestAllowedHosts(t *testing.T) {
 	loopback, _ := allowedHosts("127.0.0.1:8080")
 	lima, _ := allowedHosts("192.168.5.2:8080")
-	if !loopback["localhost:8080"] || !loopback["[::1]:8080"] || loopback["192.168.5.2:8080"] ||
+	if !loopback["localhost:8080"] || !loopback["[::1]:8080"] || !loopback["host.lima.internal:8080"] || loopback["192.168.5.2:8080"] ||
 		!lima["192.168.5.2:8080"] || lima["localhost:8080"] {
 		t.Fatalf("loopback %v lima %v", loopback, lima)
 	}

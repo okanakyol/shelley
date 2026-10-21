@@ -1,0 +1,43 @@
+# Lima template for a project VM that runs Shelley. Create VMs with
+# vm/new-vm.sh, which installs Shelley and gives each VM its own host port.
+#
+# The VM is the sandbox: nothing from the Mac is mounted, and the agent has
+# passwordless sudo inside. Model credentials stay on the Mac in
+# shelley-edge; Shelley reaches it at host.lima.internal.
+minimumLimaVersion: 2.0.0
+base:
+- template:_images/debian-13
+
+vmType: vz
+cpus: 4
+memory: 6GiB
+disk: 40GiB
+
+# Project code is cloned inside the VM, never shared from the Mac.
+mounts: []
+
+# Lima installs containerd and nerdctl by default; Shelley does not need them.
+containerd:
+  system: false
+  user: false
+
+provision:
+- mode: system
+  script: |
+    #!/bin/sh
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # chromium: Shelley's browser tool runs it headless inside the VM.
+    # Fonts keep screenshots from showing boxes for emoji and non-Latin text.
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl git build-essential \
+      chromium fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji
+
+probes:
+- mode: readiness
+  description: chromium installed
+  script: |
+    #!/bin/sh
+    timeout 600 sh -c 'until command -v chromium >/dev/null; do sleep 3; done'
+  hint: See /var/log/cloud-init-output.log in the guest.

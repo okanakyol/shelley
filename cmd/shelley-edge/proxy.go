@@ -25,9 +25,10 @@ type edge struct {
 }
 
 // allowedHosts lists the names a client may use for the listen address. A
-// loopback address answers to every loopback name; any other only to itself.
-// Checking Host stops DNS rebinding, where a web page reaches the edge
-// through its own domain resolved to this address.
+// loopback address answers to every loopback name, and to host.lima.internal:
+// Lima VMs reach the Mac's loopback under that name. Any other address
+// answers only to itself. Checking Host stops DNS rebinding, where a web page
+// reaches the edge through its own domain resolved to this address.
 func allowedHosts(listen string) (map[string]bool, error) {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
@@ -35,7 +36,7 @@ func allowedHosts(listen string) (map[string]bool, error) {
 	}
 	hosts := map[string]bool{net.JoinHostPort(host, port): true}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() || host == "localhost" {
-		for _, name := range []string{"127.0.0.1", "localhost", "::1"} {
+		for _, name := range []string{"127.0.0.1", "localhost", "::1", "host.lima.internal"} {
 			hosts[net.JoinHostPort(name, port)] = true
 		}
 	}
