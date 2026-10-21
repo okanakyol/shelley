@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"shelley.exe.dev/llm/ant"
 	"shelley.exe.dev/llm/oai"
 	"shelley.exe.dev/models"
+	"shelley.exe.dev/models/modelsdev"
 )
 
 func TestMain(m *testing.M) {
@@ -1211,5 +1213,20 @@ func TestTranscriptionModelsFromOpenAICredentials(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConfiguredIntegrationResolvesCapabilitiesFromModelsDevAPI(t *testing.T) {
+	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"schema_version":1,"models_dev_api":"https://opencode.ai/zen/go/v1","models":[{"id":"kimi-k2.6","provider":"opencode","apis":["openai_chat"]}]}`)
+	}))
+	defer edge.Close()
+	base := edge.URL + "/opencode"
+	integ := LoadConfiguredLLMIntegration(t.Context(), edge.Client(), slog.New(slog.NewTextHandler(io.Discard, nil)), "opencode", base)
+	if integ == nil || len(integ.Models) != 1 {
+		t.Fatalf("integration %+v", integ)
+	}
+	if field, found := modelsdev.LookupInterleavedReasoningField(base+"/v1", "kimi-k2.6"); !found || field != "reasoning_content" {
+		t.Fatalf("kimi-k2.6 via edge: field %q found %t", field, found)
 	}
 }

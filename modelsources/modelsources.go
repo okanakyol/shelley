@@ -540,6 +540,10 @@ type reflectionIntegrationsResponse struct {
 type llmIntegrationModelCatalog struct {
 	SchemaVersion int                `json:"schema_version"`
 	Models        []IntegrationModel `json:"models"`
+	// ModelsDevAPI is the upstream API base (as models.dev records it) that
+	// the integration proxies, so model capabilities resolve as for a direct
+	// connection.
+	ModelsDevAPI string `json:"models_dev_api,omitempty"`
 }
 
 // DiscoverLLMIntegrations looks up every integration of type "llm" via
@@ -639,6 +643,9 @@ func loadLLMIntegrationAt(ctx context.Context, httpc *http.Client, logger *slog.
 	if !fetchJSON(ctx, httpc, base+"/models.json", &catalog) {
 		logger.Warn("LLM integration discovery: models.json fetch failed; skipping", "name", name, "host", host)
 		return nil, false
+	}
+	if catalog.ModelsDevAPI != "" {
+		modelsdev.SetEndpointAlias(base, catalog.ModelsDevAPI)
 	}
 	models := integrationModelsFromCatalog(catalog)
 	transcriptionModels := transcriptionModelsFromCatalog(catalog)

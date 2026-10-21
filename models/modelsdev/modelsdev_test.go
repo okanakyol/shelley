@@ -575,3 +575,25 @@ func TestLookupModalities(t *testing.T) {
 		})
 	}
 }
+
+func TestEndpointAliasResolvesThroughProxy(t *testing.T) {
+	const proxy = "http://127.0.0.1:8080/opencode"
+	SetEndpointAlias(proxy, "https://opencode.ai/zen/go/v1")
+	t.Cleanup(func() {
+		aliasMu.Lock()
+		delete(aliases, proxy)
+		aliasMu.Unlock()
+	})
+	if field, found := LookupInterleavedReasoningField(proxy+"/v1", "kimi-k2.6"); !found || field != "reasoning_content" {
+		t.Fatalf("interleaved field via proxy: %q %t", field, found)
+	}
+	if limit, found := LookupOutputLimit(proxy+"/v1", "kimi-k2.7-code"); !found || limit != 262144 {
+		t.Fatalf("output limit via proxy: %d %t", limit, found)
+	}
+	if model, found := LookupProviderModel(proxy+"/v1/messages", "minimax-m3"); !found || model.NPM != "@ai-sdk/anthropic" {
+		t.Fatalf("provider model via proxy: %+v %t", model, found)
+	}
+	if _, found := LookupProviderModel("http://127.0.0.1:8080/chatgpt/v1", "kimi-k2.7-code"); found {
+		t.Fatal("alias leaked to another proxy path")
+	}
+}

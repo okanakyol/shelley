@@ -163,10 +163,38 @@ var knownHosts = map[string]string{
 	"generativelanguage.googleapis.com": "google",
 }
 
+var (
+	aliasMu sync.RWMutex
+	aliases = map[string]string{}
+)
+
+// SetEndpointAlias makes lookups for endpoints under proxy answer as if they
+// were under api, the upstream API base models.dev records. A credential
+// proxy serving an upstream at proxy+"/v1" thereby keeps the upstream's
+// model capabilities.
+func SetEndpointAlias(proxy, api string) {
+	aliasMu.Lock()
+	defer aliasMu.Unlock()
+	aliases[strings.TrimSuffix(proxy, "/")] = strings.TrimSuffix(api, "/")
+}
+
+func resolveAlias(raw string) string {
+	aliasMu.RLock()
+	defer aliasMu.RUnlock()
+	for proxy, api := range aliases {
+		for _, prefix := range []string{proxy + "/v1", proxy} {
+			if raw == prefix || strings.HasPrefix(raw, prefix+"/") {
+				return api + raw[len(prefix):]
+			}
+		}
+	}
+	return raw
+}
+
 // hostOf extracts a normalized host from a URL or bare host string. It strips
 // a leading "www." and lowercases the result. Returns "" if no host is found.
 func hostOf(raw string) string {
-	raw = strings.TrimSpace(raw)
+	raw = resolveAlias(strings.TrimSpace(raw))
 	if raw == "" {
 		return ""
 	}
@@ -535,7 +563,7 @@ func providerStableKey(p providerEntry) string {
 
 // pathSegments splits a URL's path into non-empty, lowercased segments.
 func pathSegments(raw string) []string {
-	raw = strings.TrimSpace(raw)
+	raw = resolveAlias(strings.TrimSpace(raw))
 	if raw == "" {
 		return nil
 	}

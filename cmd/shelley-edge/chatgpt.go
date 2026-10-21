@@ -33,17 +33,50 @@ const (
 
 var errSignedOut = errors.New("ChatGPT is not signed in; run `shelley-edge login` on this machine")
 
+// credential is the saved Sign in with ChatGPT state. HostID identifies this
+// machine to OpenAI and outlives sign-outs; the rest comes from the last
+// successful sign-in or refresh.
+type credential struct {
+	HostID   string    `json:"host_id"`
+	ClientID string    `json:"client_id,omitempty"`
+	Access   string    `json:"access_token,omitempty"`
+	Refresh  string    `json:"refresh_token,omitempty"`
+	Expires  time.Time `json:"expires,omitzero"`
+}
+
+func (c credential) signedIn() bool { return c.ClientID != "" && c.Refresh != "" }
+
 type chatgpt struct {
 	authURL, apiURL string
 	httpc           *http.Client
-	store           store
+	secrets         secrets
 	now             func() time.Time
 
 	mu sync.Mutex // serializes refreshes, which rotate the refresh token
 }
 
-func newChatGPT(s store) *chatgpt {
-	return &chatgpt{authURL: defaultAuthURL, apiURL: defaultAPIURL, httpc: http.DefaultClient, store: s, now: time.Now}
+func newChatGPT(s secrets) *chatgpt {
+	return &chatgpt{authURL: defaultAuthURL, apiURL: defaultAPIURL, httpc: http.DefaultClient, secrets: s, now: time.Now}
+}
+
+func (c *chatgpt) load() (credential, error) {
+	var cred credential
+	raw, err := c.secrets.get("chatgpt")
+	if err != nil || raw == nil {
+		return cred, err
+	}
+	if err := json.Unmarshal(raw, &cred); err != nil {
+		return cred, fmt.Errorf("decode ChatGPT credential: %w", err)
+	}
+	return cred, nil
+}
+
+func (c *chatgpt) save(cred credential) error {
+	raw, err := json.Marshal(cred)
+	if err != nil {
+		return err
+	}
+	return c.secrets.set("chatgpt", raw)
 }
 
 // accessToken returns a live access token, refreshing and saving the
@@ -51,7 +84,7 @@ func newChatGPT(s store) *chatgpt {
 func (c *chatgpt) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cred, err := c.store.load()
+	cred, err := c.load()
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +104,7 @@ func (c *chatgpt) accessToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 	c.apply(&cred, tok)
-	if err := c.store.save(cred); err != nil {
+	if err := c.save(cred); err != nil {
 		return "", err
 	}
 	return cred.Access, nil
@@ -125,14 +158,14 @@ func (c *chatgpt) requestToken(ctx context.Context, form url.Values) (tokenRespo
 // login runs the browser sign-in. ln is the loopback listener the browser is
 // sent back to; show receives the URL to open.
 func (c *chatgpt) login(ctx context.Context, ln net.Listener, show func(string)) error {
-	cred, err := c.store.load()
+	cred, err := c.load()
 	if err != nil {
 		return err
 	}
 	if cred.HostID == "" {
 		cred.HostID = "urn:uuid:" + uuid()
 		// Saved before sign-in so the host keeps one identity across attempts.
-		if err := c.store.save(cred); err != nil {
+		if err := c.save(cred); err != nil {
 			return err
 		}
 	}
@@ -223,7 +256,7 @@ func (c *chatgpt) login(ctx context.Context, ln net.Listener, show func(string))
 	}
 	cred.ClientID = cb.clientID
 	c.apply(&cred, tok)
-	return c.store.save(cred)
+	return c.save(cred)
 }
 
 func random() string {
