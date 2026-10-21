@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"shelley.exe.dev/claudetool"
@@ -227,6 +228,7 @@ func runServe(global GlobalConfig, args []string) {
 	// Create server
 	svr := server.NewServer(database, llmManager, toolSetConfig, logger, global.PredictableOnly, llmConfig.DefaultModel, *requireHeader)
 	svr.SetModelRefresher(llmConfig.RefreshBuiltModels)
+	go svr.RetryUnloadedIntegrations(context.Background(), llmConfig.UnloadedIntegrations)
 	svr.SetModelProviderManager(providerManager)
 	svr.Banner = *banner
 
@@ -566,7 +568,10 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) (
 	if err != nil {
 		return nil, err
 	}
-	defaultModel, sources := buildLLMModelSources(context.Background(), global, config, logger)
+	// unloaded holds the configured integrations the latest build could not
+	// load, so the server can retry them.
+	var unloadedMu sync.Mutex
+	defaultModel, sources, unloaded := buildLLMModelSources(context.Background(), global, config, logger)
 
 	httpc := llmhttp.NewClient(nil)
 	return &server.LLMConfig{
@@ -576,8 +581,16 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) (
 		DB:                  database,
 		HTTPC:               httpc,
 		RefreshBuiltModels: func(ctx context.Context) ([]models.Built, error) {
-			_, sources := buildLLMModelSources(ctx, global, config, logger)
+			_, sources, missing := buildLLMModelSources(ctx, global, config, logger)
+			unloadedMu.Lock()
+			unloaded = missing
+			unloadedMu.Unlock()
 			return modelsources.Build(models.All(), sources, httpc, logger), nil
+		},
+		UnloadedIntegrations: func() []string {
+			unloadedMu.Lock()
+			defer unloadedMu.Unlock()
+			return unloaded
 		},
 		Logger: logger,
 	}, nil
@@ -611,7 +624,9 @@ func loadConfig(path string) (shelleyConfig, error) {
 	return config, nil
 }
 
-func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shelleyConfig, logger *slog.Logger) (string, []modelsources.Source) {
+// It also returns the names of the shelley.json integrations whose catalog
+// could not be loaded, for example because the proxy was not running yet.
+func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shelleyConfig, logger *slog.Logger) (string, []modelsources.Source, []string) {
 	defaultModel := global.DefaultModel
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 	openAIKey := os.Getenv("OPENAI_API_KEY")
@@ -631,10 +646,13 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shell
 		llmIntegrationFound = discovered.Found
 		integs = discovered.Integrations
 	}
+	var unloaded []string
 	for _, configured := range config.LLMIntegrations {
 		llmIntegrationFound = true
 		if integ := modelsources.LoadConfiguredLLMIntegration(ctx, nil, logger, configured.Name, configured.URL); integ != nil {
 			integs = append(integs, integ)
+		} else {
+			unloaded = append(unloaded, configured.Name)
 		}
 	}
 	for i, integ := range integs {
@@ -678,7 +696,7 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, config shell
 
 	// 4. Predictable always available.
 	sources = append(sources, modelsources.Predictable())
-	return defaultModel, sources
+	return defaultModel, sources, unloaded
 }
 
 func modelsCommandDefaultID(configured string, modelList []models.Built, predictableOnly bool) string {

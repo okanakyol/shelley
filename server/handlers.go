@@ -2974,25 +2974,32 @@ func (s *Server) handleModelRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "model refresh is not configured", http.StatusNotImplemented)
 		return
 	}
-	refresher, ok := s.llmManager.(builtModelRefresher)
-	if !ok {
-		http.Error(w, "model manager does not support refresh", http.StatusInternalServerError)
-		return
-	}
-	builtModels, err := s.refreshBuiltModels(r.Context())
-	if err != nil {
+	if err := s.refreshModels(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := refresher.RefreshBuiltModels(builtModels); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.notifyModelsChanged()
 	modelList := s.getModelList()
 	markDefaultModel(modelList, s.effectiveDefaultModel(modelList))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(modelList)
+}
+
+// refreshModels rebuilds the non-custom model catalog and tells connected
+// clients the model list changed.
+func (s *Server) refreshModels(ctx context.Context) error {
+	refresher, ok := s.llmManager.(builtModelRefresher)
+	if !ok {
+		return errors.New("model manager does not support refresh")
+	}
+	builtModels, err := s.refreshBuiltModels(ctx)
+	if err != nil {
+		return err
+	}
+	if err := refresher.RefreshBuiltModels(builtModels); err != nil {
+		return err
+	}
+	s.notifyModelsChanged()
+	return nil
 }
 
 // markDefaultModel sets IsDefault=true on the entry matching defaultID.

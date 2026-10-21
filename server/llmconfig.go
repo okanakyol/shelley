@@ -41,5 +41,10 @@ type LLMConfig struct {
 	// The server calls this for explicit user-triggered refreshes.
 	RefreshBuiltModels func(context.Context) ([]models.Built, error)
 
+	// UnloadedIntegrations names the shelley.json LLM integrations the most
+	// recent build or refresh could not load. The server retries the refresh
+	// while it is non-empty.
+	UnloadedIntegrations func() []string
+
 	Logger *slog.Logger
 }
