@@ -52,11 +52,24 @@ type chatgpt struct {
 	secrets         secrets
 	now             func() time.Time
 
-	mu sync.Mutex // serializes refreshes, which rotate the refresh token
+	// Refreshes rotate the refresh token, so they run one at a time: mu within
+	// this process, lock across shelley-edge processes.
+	mu   sync.Mutex
+	lock fileLock
 }
 
-func newChatGPT(s secrets) *chatgpt {
-	return &chatgpt{authURL: defaultAuthURL, apiURL: defaultAPIURL, httpc: http.DefaultClient, secrets: s, now: time.Now}
+func newChatGPT(s secrets, lock fileLock) *chatgpt {
+	return &chatgpt{authURL: defaultAuthURL, apiURL: defaultAPIURL, httpc: http.DefaultClient, secrets: s, now: time.Now, lock: lock}
+}
+
+// saveLocked saves cred while holding the cross-process lock.
+func (c *chatgpt) saveLocked(cred credential) error {
+	unlock, err := c.lock.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return c.save(cred)
 }
 
 func (c *chatgpt) load() (credential, error) {
@@ -84,15 +97,21 @@ func (c *chatgpt) save(cred credential) error {
 func (c *chatgpt) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cred, err := c.load()
+	if tok, live, err := c.liveToken(); err != nil || live {
+		return tok, err
+	}
+	unlock, err := c.lock.lock()
 	if err != nil {
 		return "", err
 	}
-	if !cred.signedIn() {
-		return "", errSignedOut
+	defer unlock()
+	// Another shelley-edge may have refreshed while this one waited.
+	if tok, live, err := c.liveToken(); err != nil || live {
+		return tok, err
 	}
-	if c.now().Before(cred.Expires) {
-		return cred.Access, nil
+	cred, err := c.load()
+	if err != nil {
+		return "", err
 	}
 	tok, err := c.requestToken(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
@@ -110,6 +129,18 @@ func (c *chatgpt) accessToken(ctx context.Context) (string, error) {
 	return cred.Access, nil
 }
 
+// liveToken returns the saved access token when it has not expired.
+func (c *chatgpt) liveToken() (string, bool, error) {
+	cred, err := c.load()
+	if err != nil {
+		return "", false, err
+	}
+	if !cred.signedIn() {
+		return "", false, errSignedOut
+	}
+	return cred.Access, c.now().Before(cred.Expires), nil
+}
+
 type tokenResponse struct {
 	Access  string `json:"access_token"`
 	Refresh string `json:"refresh_token"`
@@ -123,6 +154,9 @@ func (c *chatgpt) apply(cred *credential, tok tokenResponse) {
 }
 
 func (c *chatgpt) requestToken(ctx context.Context, form url.Values) (tokenResponse, error) {
+	// Bounded so a stuck refresh cannot hold the lock indefinitely.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.authURL+"/api/accounts/oauth/token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return tokenResponse{}, err
@@ -165,7 +199,7 @@ func (c *chatgpt) login(ctx context.Context, ln net.Listener, show func(string))
 	if cred.HostID == "" {
 		cred.HostID = "urn:uuid:" + uuid()
 		// Saved before sign-in so the host keeps one identity across attempts.
-		if err := c.save(cred); err != nil {
+		if err := c.saveLocked(cred); err != nil {
 			return err
 		}
 	}
@@ -256,7 +290,7 @@ func (c *chatgpt) login(ctx context.Context, ln net.Listener, show func(string))
 	}
 	cred.ClientID = cb.clientID
 	c.apply(&cred, tok)
-	return c.save(cred)
+	return c.saveLocked(cred)
 }
 
 func random() string {

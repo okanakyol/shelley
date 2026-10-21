@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -59,10 +60,11 @@ type fakeOpenAI struct {
 	refresh   int // refresh tokens issued so far
 	revoked   bool
 	opencode  []*http.Request
+	dir       string // shared by every edge in a test, like one machine's config
 }
 
 func newFakeOpenAI(t *testing.T) *fakeOpenAI {
-	f := &fakeOpenAI{}
+	f := &fakeOpenAI{dir: t.TempDir()}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -102,7 +104,7 @@ func newFakeOpenAI(t *testing.T) *fakeOpenAI {
 }
 
 func testChatGPT(f *fakeOpenAI, s secrets, now time.Time) *chatgpt {
-	c := newChatGPT(s)
+	c := newChatGPT(s, fileLock{path: filepath.Join(f.dir, "chatgpt.lock")})
 	c.authURL, c.apiURL, c.httpc = f.URL, f.URL+"/v1", f.Client()
 	c.now = func() time.Time { return now }
 	return c
@@ -410,5 +412,37 @@ func TestAllowedHosts(t *testing.T) {
 	}
 	if _, err := allowedHosts("8080"); err == nil {
 		t.Fatal("accepted a listen address without a host")
+	}
+}
+
+func TestRefreshIsSerializedAcrossProcesses(t *testing.T) {
+	f := newFakeOpenAI(t)
+	now := time.Now()
+	s := signedIn(now, time.Minute)
+	later := now.Add(2 * time.Minute)
+	// Separate chatgpt values share no mutex, like separate shelley-edge
+	// processes; only the lock file and the keychain are common.
+	var wg sync.WaitGroup
+	tokens := make([]string, 4)
+	for i := range tokens {
+		c := testChatGPT(f, s, later)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tok, err := c.accessToken(t.Context())
+			if err != nil {
+				t.Error(err)
+			}
+			tokens[i] = tok
+		}()
+	}
+	wg.Wait()
+	if len(f.forms) != 1 {
+		t.Fatalf("%d refresh requests, want 1", len(f.forms))
+	}
+	for _, tok := range tokens {
+		if tok != "access-1" {
+			t.Fatalf("tokens %v", tokens)
+		}
 	}
 }

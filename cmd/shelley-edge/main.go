@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/term"
@@ -47,9 +48,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	store := keychain{service: "shelley-edge"}
-	chatgpt := newChatGPT(store)
+	config, err := os.UserConfigDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "shelley-edge:", err)
+		os.Exit(1)
+	}
+	chatgpt := newChatGPT(store, fileLock{path: filepath.Join(config, "shelley-edge", "chatgpt.lock")})
 
-	var err error
 	switch {
 	case cmd == "login":
 		err = login(ctx, chatgpt)
